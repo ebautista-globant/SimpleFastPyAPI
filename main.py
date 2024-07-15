@@ -1,17 +1,44 @@
-from fastapi import FastAPI, HTTPException, Depends
+from typing import Annotated
+
+from fastapi import FastAPI, Request, Query
+from fastapi import HTTPException, Depends
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
-from app.database import get_db
+
+from app.database import get_db, engine
+from app.models import Base
 from app.models import User
 from app.schema import UserCreate, UserUpdate
-
-
 
 app = FastAPI()
 
 
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    return JSONResponse(
+        status_code=422,
+        content={"detail": exc.errors(), "body": exc.body},
+    )
+
+
+@app.exception_handler(Exception)
+async def db_exception_handler(request: Request, exc: Exception):
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "An error occurred while processing your request."},
+    )
+
+
+Base.metadata.create_all(bind=engine)
+
+
 @app.get("/users/")
-def get_all_users(db: Session = Depends(get_db)):
+def get_all_users(name: Annotated[str | None, Query(max_length=50)] = None, db: Session = Depends(get_db)):
+    if name:
+        return db.query(User).filter(User.name == name).first()
     return db.query(User).all()
+
 
 @app.get("/users/{user_id}")
 def get_user_by_email(user_id: int, db: Session = Depends(get_db)):
@@ -29,6 +56,7 @@ def create_user(user: UserCreate, db: Session = Depends(get_db)):
     db.refresh(db_user)
     return db_user
 
+
 @app.put("/users/{user_id}")
 def update_user_by_email(user_id: int, user: UserUpdate, db: Session = Depends(get_db)):
     db_user = db.query(User).filter(User.id == user_id).first()
@@ -38,6 +66,7 @@ def update_user_by_email(user_id: int, user: UserUpdate, db: Session = Depends(g
     db_user.email = user.email
     db.commit()
     return {"message": "User updated successfully"}
+
 
 @app.delete("/users/{user_id}")
 def delete_user_by_email(user_id: int, db: Session = Depends(get_db)):
