@@ -39,6 +39,7 @@ def get_all_users(name: Annotated[str | None, Query(max_length=50)] = None, db: 
         return db.query(User).filter(User.name == name).first()
     return db.query(User).all()
 
+
 @app.get("/users/{user_id}")
 def get_user_by_email(user_id: int, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == user_id).first()
