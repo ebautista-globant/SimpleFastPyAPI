@@ -8,8 +8,8 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db, engine
 from app.models import Base
-from app.models import User
-from app.schema import UserCreate, UserUpdate
+from app.models import User, Product, Inventory, Sale, DataWarehouse
+from app.schema import UserCreate, UserUpdate, DataCreate
 
 app = FastAPI()
 
@@ -76,3 +76,38 @@ def delete_user_by_email(user_id: int, db: Session = Depends(get_db)):
     db.delete(db_user)
     db.commit()
     return {"message": "User deleted successfully"}
+
+
+@app.get("/products/{product_id}")
+def get_product_by_id(product_id: int, db: Session = Depends(get_db)):
+    product = db.query(Product).filter(Product.id == product_id).first()
+    if product:
+        return product
+    raise HTTPException(status_code=404, detail="Product not found")
+
+
+@app.get("/inventory/{product_id}")
+def get_inventory_by_product_id(product_id: int, db: Session = Depends(get_db)):
+    product = db.query(Inventory).filter(Inventory.id == product_id).first()
+    if product:
+        return product
+    raise HTTPException(status_code=404, detail="Product inventory not found")
+
+
+@app.get("/sales/{sales_id}")
+def get_sale_by_id(sale_id: int, db: Session = Depends(get_db)):
+    sale = db.query(Sale).filter(Sale.id == sale_id).first()
+    if sale:
+        return sale
+    raise HTTPException(status_code=404, detail="Product inventory not found")
+
+
+@app.post("/data_warehouse/")
+def create_data(data: DataCreate, db: Session = Depends(get_db)):
+    print(data)
+    db_data = DataWarehouse(data=data.data)
+    print(data)
+    db.add(db_data)
+    db.commit()
+    db.refresh(db_data)
+    return db_data

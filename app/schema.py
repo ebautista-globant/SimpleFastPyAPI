@@ -10,3 +10,7 @@ class UserCreate(BaseModel):
 class UserUpdate(BaseModel):
     name: str
     email: str
+
+
+class DataCreate(BaseModel):
+    data: dict
