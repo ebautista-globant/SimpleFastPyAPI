@@ -1,111 +1,138 @@
-from typing import Annotated
-
-from fastapi import FastAPI, Request, Query
-from fastapi import HTTPException, Depends
-from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, Depends
+from pydantic import BaseModel
+from typing import List
+from bs4 import BeautifulSoup
+import requests
+from sqlalchemy import create_engine, Column, Integer, String
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import Session
-
-from app.database import get_db, engine
-from app.models import Base
-from app.models import User, Product, Inventory, Sale, DataWarehouse
-from app.schema import UserCreate, UserUpdate, DataCreate
 
 app = FastAPI()
 
+# SQLAlchemy model
+Base = declarative_base()
 
-@app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    return JSONResponse(
-        status_code=422,
-        content={"detail": exc.errors(), "body": exc.body},
-    )
+class Character(Base):
+    __tablename__ = 'characters'
 
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String)
+    description = Column(String)
+    species = Column(String)
+    homeworld = Column(String)
+    appearances = Column(String)
+    affiliations = Column(String)
+    locations = Column(String)
+    dimensions = Column(String)
+    weapons = Column(String)
+    vehicles = Column(String)
+    tools = Column(String)
 
-@app.exception_handler(Exception)
-async def db_exception_handler(request: Request, exc: Exception):
-    return JSONResponse(
-        status_code=500,
-        content={"detail": "An error occurred while processing your request."},
-    )
+# SQLAlchemy database connection
+SQLALCHEMY_DATABASE_URL = "sqlite:///./star_wars.db"  # SQLite database URL
+engine = create_engine(SQLALCHEMY_DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+# Dependency to get the database session
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
+# Create database tables
 Base.metadata.create_all(bind=engine)
 
+# Pydantic model
+class Character(BaseModel):
+    name: str
+    description: str
+    appearances: List[str] = []
+    affiliations: List[str] = []
+    locations: List[str] = []
+    dimensions: List[str] = []
+    weapons: List[str] = []
+    vehicles: List[str] = []
+    tools: List[str] = []
 
-@app.get("/users/")
-async def get_all_users(name: Annotated[str | None, Query(max_length=50)] = None, db: Session = Depends(get_db)):
-    if name:
-        return db.query(User).filter(User.name == name).first()
-    return db.query(User).all()
+# Scrape character endpoint
+@app.post("/scrape_character")
+async def scrape_character(url: str, db: Session = Depends(get_db)):
+    # Fetch the HTML content from the website
+    response = requests.get(url)
+    html = response.text
 
+    # Parse the HTML content
+    soup = BeautifulSoup(html, 'html.parser')
 
-@app.get("/users/{user_id}")
-async def get_user_by_email(user_id: int, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.id == user_id).first()
-    if user:
-        return user
-    raise HTTPException(status_code=404, detail="User not found")
+    # Extract the character information from the HTML
+    name = soup.find('span', class_='long-title').text.strip()
+    description = soup.find('p', class_='desc').text.strip()
+    appearances = [a.text.strip() for a in soup.select('.category:has(.heading:contains("Appearances")) a')]
+    affiliations = [a.text.strip() for a in soup.select('.category:has(.heading:contains("Affiliations")) a')]
+    locations = [a.text.strip() for a in soup.select('.category:has(.heading:contains("Locations")) a')]
+    dimensions = [d.text.strip() for d in soup.select('.category:has(.heading:contains("Dimensions")) .property-name')]
+    weapons = [w.text.strip() for w in soup.select('.category:has(.heading:contains("Weapons")) a')]
+    vehicles = [v.text.strip() for v in soup.select('.category:has(.heading:contains("Vehicles")) a')]
+    tools = [t.text.strip() for t in soup.select('.category:has(.heading:contains("Tool")) a')]
 
-
-@app.post("/users/")
-async def create_user(user: UserCreate, db: Session = Depends(get_db)):
-    db_user = User(name=user.name, email=user.email, password=user.password)
-    db.add(db_user)
+    # Insert the character data into the database using SQLAlchemy
+    character_data = Character(
+        name=name,
+        description=description,
+        appearances=",".join(appearances),
+        affiliations=",".join(affiliations),
+        locations=",".join(locations),
+        dimensions=",".join(dimensions),
+        weapons=",".join(weapons),
+        vehicles=",".join(vehicles),
+        tools=",".join(tools)
+    )
+    db.add(character_data)
     db.commit()
-    db.refresh(db_user)
-    return db_user
+    db.refresh(character_data)
 
+    # Return the scraped character data
+    character = Character(
+        name=name,
+        description=description,
+        appearances=appearances,
+        affiliations=affiliations,
+        locations=locations,
+        dimensions=dimensions,
+        weapons=weapons,
+        vehicles=vehicles,
+        tools=tools
+    )
+    return character
 
-@app.put("/users/{user_id}")
-async def update_user_by_email(user_id: int, user: UserUpdate, db: Session = Depends(get_db)):
-    db_user = db.query(User).filter(User.id == user_id).first()
-    if not db_user:
-        raise HTTPException(status_code=404, detail="User not found")
-    db_user.name = user.name
-    db_user.email = user.email
+@app.post("/manualy_create_character")
+async def create_character(
+    name: str,
+    description: str,
+    appearances: List[str] = [],
+    affiliations: List[str] = [],
+    locations: List[str] = [],
+    dimensions: List[str] = [],
+    weapons: List[str] = [],
+    vehicles: List[str] = [],
+    tools: List[str] = [],
+    db: Session = Depends(get_db)
+):
+    character_data = Character(
+        name=name,
+        description=description,
+        appearances=",".join(appearances),
+        affiliations=",".join(affiliations),
+        locations=",".join(locations),
+        dimensions=",".join(dimensions),
+        weapons=",".join(weapons),
+        vehicles=",".join(vehicles),
+        tools=",".join(tools)
+    )
+    db.add(character_data)
     db.commit()
-    return {"message": "User updated successfully"}
-
-
-@app.delete("/users/{user_id}")
-async def delete_user_by_email(user_id: int, db: Session = Depends(get_db)):
-    db_user = db.query(User).filter(User.id == user_id).first()
-    if not db_user:
-        raise HTTPException(status_code=404, detail="User not found")
-    db.delete(db_user)
-    db.commit()
-    return {"message": "User deleted successfully"}
-
-
-@app.get("/products/{product_id}")
-async def get_product_by_id(product_id: int, db: Session = Depends(get_db)):
-    product = db.query(Product).filter(Product.id == product_id).first()
-    if product:
-        return product
-    raise HTTPException(status_code=404, detail="Product not found")
-
-
-@app.get("/inventory/{product_id}")
-async def get_inventory_by_product_id(product_id: int, db: Session = Depends(get_db)):
-    product = db.query(Inventory).filter(Inventory.id == product_id).first()
-    if product:
-        return product
-    raise HTTPException(status_code=404, detail="Product inventory not found")
-
-
-@app.get("/sales/{sales_id}")
-async def get_sale_by_id(sales_id: int, db: Session = Depends(get_db)):
-    sale = db.query(Sale).filter(Sale.id == sales_id).first()
-    if sale:
-        return sale
-    raise HTTPException(status_code=404, detail="Product inventory not found")
-
-
-@app.post("/data_warehouse/")
-async def create_data(data: DataCreate, db: Session = Depends(get_db)):
-    db_data = DataWarehouse(data=data.data)
-    db.add(db_data)
-    db.commit()
-    db.refresh(db_data)
-    return db_data
+    db.refresh(character_data)
+    return character_data
